@@ -40,6 +40,9 @@ export const AuthProvider = ({ children }) => {
       }
     } catch (err) {
       console.error("Exchange error:", err);
+      // DIAGNOSTIC ALERT: Remove after fixing
+      alert(`Login Failed!\n\nTrying to reach: ${API_URL}\n\nError: ${err.message}\nResponse: ${JSON.stringify(err.response?.data || {})}`);
+      
       setError("Authentication failed during token exchange.");
       setIsLoading(false);
     }
