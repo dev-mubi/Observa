@@ -25,7 +25,7 @@ const HistoryGrid = () => {
       });
       console.log("History Response:", response.data);
       if (response.data.success) {
-        setIncidents(response.data.events);
+        setIncidents(response.data.incidents || []);
       }
     } catch (error) {
       console.error("Failed to fetch history:", error);
@@ -75,9 +75,9 @@ const HistoryGrid = () => {
 
             <div className="incident-preview">
                {/* Show first image as cover */}
-               {incident.security_events?.[0] && (
+               {incident.events?.[0] && (
                  <img 
-                   src={incident.security_events[0].image_url} 
+                   src={incident.events[0].image_url} 
                    alt="Incident Cover" 
                    className="cover-image"
                  />
@@ -86,7 +86,7 @@ const HistoryGrid = () => {
 
             {expandedId === incident.id && (
               <div className="incident-details" onClick={(e) => e.stopPropagation()}>
-                <IncidentSlideshow events={incident.security_events} />
+                <IncidentSlideshow events={incident.events} />
               </div>
             )}
           </div>
