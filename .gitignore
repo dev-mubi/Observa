@@ -1,0 +1,14 @@
+# .NET/WPF
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userprefs
+# OS generated
+Thumbs.db
+Desktop.ini
+
+# Large Data
+Models/
+Snapshots/
