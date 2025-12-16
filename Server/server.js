@@ -281,12 +281,17 @@ app.post("/api/log-event", async (req, res) => {
     if (eventError) throw eventError;
 
     // BROADCAST TO FRONTEND (Securely)
+    const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/security-images/${image_path}`;
+    
     const publicEvent = {
         ...newEvent,
-        image_url: `${process.env.SUPABASE_URL}/storage/v1/object/public/security-images/${image_path}`
+        image_url: publicUrl
     };
     // Only send to the user's room
     io.to(user_email).emit('new-event', publicEvent);
+
+    // TRIGGER EMAIL FLOW (Centralized)
+    handleEmailTrigger(user_email, publicUrl, incidentId);
 
     res.json({ success: true, incidentId });
 
@@ -296,51 +301,39 @@ app.post("/api/log-event", async (req, res) => {
   }
 });
 
-/**
- * Endpoint 9: Get Events History
- */
-app.get("/api/events", async (req, res) => {
-  const { user_email } = req.query; // Authenticated user
-  
-  try {
-    const { data: incidents, error } = await supabase
-      .from('incidents')
-      .select(`
-        *,
-        security_events (
-          id,
-          image_url,
-          timestamp
-        )
-      `)
-      .eq('user_email', user_email) 
-      .order('start_time', { ascending: false })
-      .limit(20);
+// Email Logic handled here
+function handleEmailTrigger(email, imageUrl, incidentId) {
+    console.log(`[EMAIL] 📨 Processing trigger for ${email}...`);
+    
+    if (alertSessions.has(email)) {
+        // Active session: Log for summary
+        const session = alertSessions.get(email);
+        session.logs.push({
+            timestamp: new Date().toISOString(),
+            frameImage: imageUrl // Store URL
+        });
+        console.log(`[EMAIL] 📸 Event logged to session (${session.logs.length} total)`);
+    } else {
+        // New Session -> Send Immediate Email
+        console.log(`[EMAIL] 🚨 New session. Sending immediate alert.`);
+        
+        // Start Summary Timer (3 mins)
+        const timer = setTimeout(() => {
+            sendSummaryEmail(email);
+        }, SAMPLING_CONFIG.COOLDOWN_DURATION);
 
-    if (error) throw error;
+        alertSessions.set(email, {
+            startTime: Date.now(),
+            timer: timer,
+            logs: [{ timestamp: new Date().toISOString(), frameImage: imageUrl }],
+            incidentId: incidentId
+        });
 
-    // Transform for UI: Fix image URLs to be full public URLs
-    const events = incidents.map(inc => ({
-      ...inc,
-      security_events: inc.security_events.map(ev => ({
-        ...ev,
-        image_url: ev.image_url.startsWith('http') ? ev.image_url : `${process.env.SUPABASE_URL}/storage/v1/object/public/security-images/${ev.image_url}`
-      }))
-    }));
+        sendImmediateEmail(email, imageUrl, null, new Date().toLocaleString(), "Monitor Camera");
+    }
+}
 
-    res.json({ success: true, events });
-  } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-
-// Email Logic is now fully handled by /send-alert endpoint
-// This ensures centralized session management and sampling.
-
-
-
-async function sendImmediateEmail(toEmail, frameImage, faceImage, timestamp, location) {
+async function sendImmediateEmail(toEmail, imageUrl, faceImage, timestamp, location) {
   console.log(`[EMAIL] 📧 Sending IMMEDIATE alert to ${toEmail}...`);
 
   const clientUrl = "https://observa-client.vercel.app/";
@@ -354,271 +347,84 @@ async function sendImmediateEmail(toEmail, frameImage, faceImage, timestamp, loc
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
       </head>
       <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased;">
-        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc;">
-          <tr>
-            <td align="center" style="padding: 40px 20px;">
-              <div style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-                
-                <!-- Header -->
-                <div style="background-color: #ffffff; padding: 32px 40px; border-bottom: 1px solid #f1f5f9;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+             <div style="padding: 32px 40px; border-bottom: 1px solid #f1f5f9;">
                   <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #0f172a; letter-spacing: -0.025em;">Security Alert</h1>
                   <p style="margin: 8px 0 0 0; font-size: 14px; color: #64748b;">Person Detected at Monitor Location</p>
+             </div>
+             <div style="padding: 40px;">
+                <p style="margin: 0 0 24px 0; font-size: 16px; color: #334155;">Observa has detected a person. See evidence below.</p>
+                
+                <div style="margin-bottom: 24px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+                    <img src="${imageUrl}" alt="Evidence" style="width: 100%; display: block;" />
                 </div>
 
-                <!-- Content -->
-                <div style="padding: 40px;">
-                  <p style="margin: 0 0 24px 0; font-size: 16px; line-height: 1.6; color: #334155;">
-                    Observa has detected a person in your monitored area. This automated alert includes photographic evidence captured at the time of the event.
-                  </p>
-
-                  <!-- Key Info -->
-                  <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 20px; margin-bottom: 32px;">
-                    <table width="100%" border="0" cellspacing="0" cellpadding="0">
-                      <tr>
-                        <td style="padding-bottom: 8px; font-size: 13px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Timestamp</td>
-                        <td style="padding-bottom: 8px; font-size: 14px; font-weight: 500; color: #0f172a; text-align: right;">${timestamp || new Date().toLocaleString()}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size: 13px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Location</td>
-                        <td style="font-size: 14px; font-weight: 500; color: #0f172a; text-align: right;">Monitor Camera</td>
-                      </tr>
-                    </table>
-                  </div>
-
-                  <!-- Evidence -->
-                  <div style="margin-bottom: 32px;">
-                    <h3 style="margin: 0 0 16px 0; font-size: 14px; font-weight: 600; color: #0f172a; text-transform: uppercase; letter-spacing: 0.05em;">Captured Evidence</h3>
-                    <div style="border-radius: 6px; overflow: hidden; border: 1px solid #e2e8f0;">
-                      <img src="cid:frameImage" alt="Camera Snapshot" style="width: 100%; display: block; height: auto;" />
-                    </div>
-                  </div>
-
-                  ${faceImage ? `
-                  <div style="margin-bottom: 32px;">
-                    <h3 style="margin: 0 0 16px 0; font-size: 14px; font-weight: 600; color: #0f172a; text-transform: uppercase; letter-spacing: 0.05em;">Detected Face</h3>
-                    <div style="border-radius: 6px; overflow: hidden; border: 1px solid #e2e8f0; display: inline-block;">
-                      <img src="cid:faceImage" alt="Face Region" style="width: 150px; display: block; height: auto;" />
-                    </div>
-                  </div>
-                  ` : ""}
-
-                  <!-- Primary Action -->
-                  <div style="text-align: center; margin: 40px 0;">
-                    <a href="${clientUrl}" style="background-color: #0f172a; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 15px; display: inline-block;">View Live Feed</a>
-                  </div>
-
-                  <p style="margin: 0; font-size: 14px; color: #64748b; text-align: center;">
-                    Please log in to your dashboard to view the live stream.
-                  </p>
+                <div style="text-align: center; margin-top: 32px;">
+                    <a href="${clientUrl}" style="background-color: #0f172a; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">View Live Feed</a>
                 </div>
-
-                <!-- Footer -->
-                <div style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 24px; text-align: center;">
-                  <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #475569;">Observa Security</p>
-                  <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                    Automated Alert System • Do not reply
-                  </p>
-                </div>
-              </div>
-            </td>
-          </tr>
-        </table>
+             </div>
+        </div>
       </body>
       </html>
     `;
 
-    // Send email logic extracted below to reuse transporter
-    await sendEmailWithAttachments(toEmail, "Security Alert: Person Detected", htmlContent, frameImage, faceImage);
+    await transporter.sendMail({
+      from: `"Observa Security" <${process.env.EMAIL_USER}>`,
+      to: toEmail,
+      subject: "Security Alert: Person Detected",
+      html: htmlContent
+    });
     
   } catch (error) {
-    console.error("[EMAIL] ❌ Failed to send immediate email:", error);
-    // Don't crash request handler, just log
+    console.error("[EMAIL] ❌ Failed to send immediate:", error);
   }
 }
 
 async function sendSummaryEmail(toEmail) {
   const session = alertSessions.get(toEmail);
   if (!session) return;
+  alertSessions.delete(toEmail); 
 
-  alertSessions.delete(toEmail); // Clear session
-  
-  const logCount = session.logs.length;
-  if (logCount === 0) {
-      console.log(`[EMAIL] ℹ️ Summary timer ended for ${toEmail}, but no additional alerts occurred.`);
-      return;
-  }
-
-  console.log(`[EMAIL] 📋 Sending SUMMARY email to ${toEmail} for ${logCount} aggregated events...`);
-
+  console.log(`[EMAIL] 📋 Sending SUMMARY to ${toEmail} (${session.logs.length} events)`);
   const clientUrl = "https://observa-client.vercel.app/";
-  const startTimeStr = new Date(session.startTime).toLocaleTimeString();
-  const endTimeStr = new Date().toLocaleTimeString();
-
-  // Smart Photo Sampling - limit to max photos if too many events
-  let sampledLogs = session.logs;
-  let samplingApplied = false;
   
-  if (session.logs.length > SAMPLING_CONFIG.MAX_PHOTOS_IN_SUMMARY) {
-    samplingApplied = true;
-    
-    const first = session.logs[0];
-    const last = session.logs[session.logs.length - 1];
-    const middle = session.logs.slice(1, -1);
-    
-    // Sample evenly from middle
-    const middleSampleSize = SAMPLING_CONFIG.MAX_PHOTOS_IN_SUMMARY - 2;
-    const sampledMiddle = [];
-    
-    if (middle.length > 0 && middleSampleSize > 0) {
-      const step = middle.length / middleSampleSize;
-      for (let i = 0; i < middleSampleSize; i++) {
-        const index = Math.floor(i * step);
-        if (index < middle.length) sampledMiddle.push(middle[index]);
-      }
-    }
-    sampledLogs = [first, ...sampledMiddle, last];
-  }
+  // Use first, middle, last photos (URL based)
+  let photos = session.logs.map(l => l.frameImage).slice(0, 10); // Check limit
 
-  // Build event list HTML with sampled snapshots
-  let eventsHtml = '';
-  const attachments = [];
-  
-  sampledLogs.forEach((log, index) => {
-    const eventNum = index + 1;
-    const eventTime = new Date(log.timestamp).toLocaleTimeString();
-    
-    const frameCid = `frame_${eventNum}`;
-    const faceCid = `face_${eventNum}`;
-    
-    if (log.frameImage) {
-      attachments.push({ filename: `snapshot_${eventNum}.jpg`, content: log.frameImage.split("base64,")[1] || log.frameImage, encoding: "base64", cid: frameCid });
-    }
-    
-    if (log.faceImage) {
-      attachments.push({ filename: `face_${eventNum}.jpg`, content: log.faceImage.split("base64,")[1] || log.faceImage, encoding: "base64", cid: faceCid });
-    }
-    
-    eventsHtml += `
-      <div style="border-top: 1px solid #e2e8f0; padding: 20px 0; margin-top: 20px;">
-        <div style="margin-bottom: 12px; font-size: 14px; font-weight: 600; color: #334155;">
-          Event at ${eventTime}
-        </div>
-        ${log.frameImage ? `<img src="cid:${frameCid}" alt="Snapshot ${eventNum}" style="width: 100%; max-width: 400px; border-radius: 4px; border: 1px solid #e2e8f0; display: block; margin-bottom: 12px;" />` : ''}
-        ${log.faceImage ? `
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase;">Face Detected</span>
-            <img src="cid:${faceCid}" alt="Face ${eventNum}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px; border: 1px solid #e2e8f0;" />
-          </div>` 
-        : ''}
-      </div>
-    `;
-  });
+  let photosHtml = photos.map(url => `
+    <div style="margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+        <img src="${url}" style="width: 100%; display: block;" />
+    </div>
+  `).join('');
 
   const htmlContent = `
     <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    </head>
-    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-      <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc;">
-        <tr>
-          <td align="center" style="padding: 40px 20px;">
-            <div style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-              
-              <!-- Header -->
-              <div style="background-color: #ffffff; padding: 32px 40px; border-bottom: 1px solid #f1f5f9;">
-                <h1 style="margin: 0; font-size: 24px; font-weight: 700; color: #0f172a; letter-spacing: -0.025em;">Activity Report</h1>
-                <p style="margin: 8px 0 0 0; font-size: 14px; color: #64748b;">Aggregated Detections Summary</p>
-              </div>
-
-              <!-- Content -->
-              <div style="padding: 40px;">
-                <p style="margin: 0 0 24px 0; font-size: 16px; line-height: 1.6; color: #334155;">
-                  The monitoring session has concluded. Observa recorded <strong>${logCount + 1} total events</strong> between <strong>${startTimeStr}</strong> and <strong>${endTimeStr}</strong>.
-                </p>
-
-                <!-- Stats Grid -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 32px;">
-                  <div style="background-color: #f8fafc; padding: 16px; border-radius: 6px; border: 1px solid #e2e8f0;">
-                      <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase;">Duration</div>
-                      <div style="font-size: 16px; font-weight: 700; color: #0f172a; margin-top: 4px;">${Math.round((Date.now() - session.startTime) / 1000 / 60)} min</div>
-                  </div>
-                  <div style="background-color: #f8fafc; padding: 16px; border-radius: 6px; border: 1px solid #e2e8f0;">
-                      <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase;">Events</div>
-                      <div style="font-size: 16px; font-weight: 700; color: #0f172a; margin-top: 4px;">${logCount + 1}</div>
-                  </div>
-                </div>
-
-                <!-- Timeline -->
-                <h3 style="margin: 0 0 16px 0; font-size: 14px; font-weight: 600; color: #0f172a; text-transform: uppercase; letter-spacing: 0.05em;">Event Timeline</h3>
-                ${eventsHtml}
-                
-                ${samplingApplied ? `<p style="font-size: 13px; color: #64748b; font-style: italic; margin-top: 16px;">* Showing ${sampledLogs.length} representative events from total.</p>` : ''}
-
-                <!-- Primary Action -->
-                <div style="text-align: center; margin: 40px 0;">
-                  <a href="${clientUrl}" style="background-color: #ffffff; color: #0f172a; padding: 14px 32px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 15px; display: inline-block; border: 1px solid #e2e8f0;">View Full History</a>
-                </div>
-              </div>
-
-              <!-- Footer -->
-              <div style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 24px; text-align: center;">
-                <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #475569;">Observa Security</p>
-                <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                  Activity Report • ${new Date().toLocaleDateString()}
-                </p>
-              </div>
+    <body>
+        <div style="max-width: 600px; margin: 0 auto; background: white; font-family: sans-serif; border: 1px solid #e2e8f0;">
+            <div style="padding: 24px; border-bottom: 1px solid #f1f5f9;">
+                <h1 style="margin: 0;">Activity Report</h1>
+                <p style="color: #64748b;">${session.logs.length} Events Recorded</p>
             </div>
-          </td>
-        </tr>
-      </table>
+            <div style="padding: 24px;">
+                ${photosHtml}
+                <div style="text-align: center; margin-top: 32px;">
+                    <a href="${clientUrl}" style="background: #0f172a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">View Full History</a>
+                </div>
+            </div>
+        </div>
     </body>
-    </html>
   `;
 
   try {
-      const info = await transporter.sendMail({
+      await transporter.sendMail({
         from: `"Observa Security" <${process.env.EMAIL_USER}>`,
         to: toEmail,
-        subject: `Activity Report: ${logCount + 1} Events Recorded`,
-        html: htmlContent,
-        attachments: attachments,
+        subject: `Activity Report: ${session.logs.length} Events`,
+        html: htmlContent
       });
-      console.log(`[EMAIL] ✓ Summary email sent to ${toEmail} with ${attachments.length} images`);
   } catch (error) {
-      console.error("[EMAIL] ❌ Failed to send summary email:", error);
+      console.error("[EMAIL] ❌ Failed summary:", error);
   }
-}
-
-async function sendEmailWithAttachments(to, subject, html, frameImage, faceImage) {
-    const attachments = [];
-    if (frameImage) {
-      attachments.push({
-        filename: "snapshot.jpg",
-        content: frameImage.split("base64,")[1] || frameImage,
-        encoding: "base64",
-        cid: "frameImage",
-      });
-    }
-    if (faceImage) {
-      attachments.push({
-        filename: "face.jpg",
-        content: faceImage.split("base64,")[1] || faceImage,
-        encoding: "base64",
-        cid: "faceImage",
-      });
-    }
-
-    const info = await transporter.sendMail({
-      from: `"Observa Security" <${process.env.EMAIL_USER}>`,
-      to: to,
-      subject: subject,
-      html: html,
-      attachments: attachments,
-    });
-    return info;
 }
 
 

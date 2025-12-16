@@ -11,7 +11,7 @@ namespace SentinelIntrusionDetection.Services
     {
         private readonly HttpClient _httpClient;
         // Base URL for your Express Server
-        private const string BaseUrl = "http://localhost:5000/api"; 
+        private const string BaseUrl = "https://observa-ocaa.onrender.com/api"; 
 
         public CloudStorageService(HttpClient httpClient)
         {
@@ -42,7 +42,7 @@ namespace SentinelIntrusionDetection.Services
                 using (var content = new ByteArrayContent(imageBytes))
                 {
                     content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
-                    var uploadResponse = await _httpClient.PutAsync(urlData.UploadUrl, content);
+                    var uploadResponse = await _httpClient.PutAsync(urlData.UploadUrl!, content);
 
                     if (!uploadResponse.IsSuccessStatusCode)
                     {
@@ -68,7 +68,7 @@ namespace SentinelIntrusionDetection.Services
                 var eventData = new
                 {
                     user_email = userEmail,
-                    image_path = imagePath,
+                    image_path = imagePath, // Send simpler name
                     timestamp = DateTime.UtcNow,
                     confidence = confidence
                 };
@@ -93,9 +93,9 @@ namespace SentinelIntrusionDetection.Services
         private class UploadUrlResponse
         {
             public bool Success { get; set; }
-            public string UploadUrl { get; set; }
-            public string Path { get; set; }
-            public string PublicUrl { get; set; }
+            public string? UploadUrl { get; set; }
+            public string? Path { get; set; }
+            public string? PublicUrl { get; set; }
         }
     }
 }

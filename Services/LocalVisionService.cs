@@ -549,23 +549,15 @@ namespace SentinelIntrusionDetection.Services
                                 }
                             } catch {}
 
-                            // Fire and forget upload task + Email
+                            // Fire and forget upload task
                             _ = Task.Run(async () => {
-                                // 1. Send Email Alert (Directly to Server)
-                                if (!string.IsNullOrEmpty(frameBase64))
-                                {
-                                    await _emailService.SendUnknownFaceAlertAsync(_currentUserEmail, frameBase64, faceBase64, new FaceLocation
-                                    {
-                                        X = face.Location.X, Y = face.Location.Y, Width = face.Location.Width, Height = face.Location.Height
-                                    });
-                                }
-
-                                // 2. Upload to Cloud (Supabase)
+                                // Upload to Cloud (Supabase) -> Server will handle Email Alert via Webhook/API
                                 if (frameBytes != null)
                                 {
                                     string? imagePath = await _cloudService.UploadEventImageAsync(frameBytes, _currentUserEmail);
                                     if (imagePath != null)
                                     {
+                                        // Log event to server (which triggers the email flow on the backend)
                                         await _cloudService.LogEventAsync(_currentUserEmail, imagePath, 0.9);
                                     }
                                 }
