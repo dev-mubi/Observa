@@ -19,14 +19,17 @@ const HistoryGrid = () => {
   const fetchHistory = async () => {
     try {
       if (!user?.email) return;
+      console.log(`Fetching history for ${user.email} from ${API_URL}/events`);
       const response = await axios.get(`${API_URL}/events`, {
         params: { user_email: user.email }
       });
+      console.log("History Response:", response.data);
       if (response.data.success) {
         setIncidents(response.data.events);
       }
     } catch (error) {
       console.error("Failed to fetch history:", error);
+      alert(`History Fetch Error: ${error.message}\nURL: ${API_URL}`);
     } finally {
       setLoading(false);
     }
@@ -40,8 +43,14 @@ const HistoryGrid = () => {
 
   return (
     <div className="history-grid">
+      <div style={{fontSize: '10px', color: '#ccc', marginBottom: '10px', textAlign: 'center'}}>
+        DEBUG: Fetching from {API_URL}/events
+      </div>
       {incidents.length === 0 ? (
-        <p className="empty-state">No recorded incidents yet.</p>
+        <p className="empty-state">
+             No recorded incidents yet. <br/>
+             <small>(Check Console for Details)</small>
+        </p>
       ) : (
         incidents.map((incident) => (
           <div 

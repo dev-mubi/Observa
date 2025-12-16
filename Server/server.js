@@ -188,10 +188,56 @@ app.post("/api/generate-upload-url", async (req, res) => {
 });
 
 /**
- * Endpoint 8: Log Event (Supabase + Incidents)
+ * Endpoint 8: Get Events for a User
+ */
+app.get("/api/events", async (req, res) => {
+  let { user_email } = req.query; // Authenticated user
+  if (user_email) user_email = user_email.toLowerCase();
+  
+  try {
+    const { data: incidents, error: incidentsError } = await supabase
+      .from('incidents')
+      .select('id, start_time, end_time, status, total_events')
+      .eq('user_email', user_email)
+      .order('start_time', { ascending: false });
+
+    if (incidentsError) throw incidentsError;
+
+    const incidentsWithEvents = await Promise.all(incidents.map(async (incident) => {
+      const { data: events, error: eventsError } = await supabase
+        .from('security_events')
+        .select('id, image_url, timestamp, location')
+        .eq('incident_id', incident.id)
+        .order('timestamp', { ascending: true });
+
+      if (eventsError) throw eventsError;
+
+      // Prepend Supabase URL to image_url for public access
+      const formattedEvents = events.map(event => ({
+        ...event,
+        image_url: `${process.env.SUPABASE_URL}/storage/v1/object/public/security-images/${event.image_url}`
+      }));
+
+      return {
+        ...incident,
+        events: formattedEvents
+      };
+    }));
+
+    res.json({ success: true, incidents: incidentsWithEvents });
+
+  } catch (error) {
+    console.error("Get Events Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Endpoint 9: Log Event (Supabase + Incidents)
  */
 app.post("/api/log-event", async (req, res) => {
-  const { user_email, image_path, timestamp, confidence } = req.body;
+  const { user_email: rawEmail, image_path, timestamp, confidence } = req.body;
+  const user_email = rawEmail?.toLowerCase(); // Integrity: Always lowercase
 
   try {
     // 1. Check for Active Incident
