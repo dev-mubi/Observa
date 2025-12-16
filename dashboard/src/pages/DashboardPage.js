@@ -6,6 +6,7 @@ import '../App.css';
 
 const DashboardPage = () => {
   const { user, logout } = useAuth();
+  const [isMenuOpen, setIsMenuOpen] = React.useState(false);
 
   return (
     <div className="dashboard-container">
@@ -15,11 +16,28 @@ const DashboardPage = () => {
             <div className="header-logo-icon">O</div>
             <span>OBSERVA</span>
         </div>
+        
+        {/* Desktop Menu */}
         <div className="user-menu">
           <span>{user?.email}</span>
           <button onClick={logout} className="logout-btn">Sign Out</button>
         </div>
+
+        {/* Hamburger Button (Mobile Only) */}
+        <button className="hamburger-btn" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+           <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
+           </svg>
+        </button>
       </header>
+      
+      {/* Mobile Navigation Dropdown */}
+      {isMenuOpen && (
+        <div className="mobile-nav-overlay">
+           <div style={{fontWeight: 600, color: '#0f172a'}}>{user?.email}</div>
+           <button onClick={logout} className="logout-btn" style={{textAlign: 'center', width: '100%'}}>Sign Out</button>
+        </div>
+      )}
 
       {/* 2. Main Content (Grid) */}
       <main className="dashboard-content">

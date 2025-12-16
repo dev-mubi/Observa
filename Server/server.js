@@ -156,7 +156,7 @@ const alertSessions = new Map();
 const SAMPLING_CONFIG = {
   MIN_TIME_BETWEEN_LOGS: 10000,        // 10 seconds minimum between logged events
   MAX_PHOTOS_IN_SUMMARY: 12,           // Maximum 12 photos per summary email
-  COOLDOWN_DURATION: 3 * 60 * 1000     // 3 minutes cooldown
+  COOLDOWN_DURATION: 10 * 60 * 1000     // 10 minutes cooldown
 };
 
 
@@ -267,7 +267,7 @@ app.post("/api/log-event", async (req, res) => {
       const now = new Date().getTime();
       const diffMinutes = (now - lastTime) / 1000 / 60;
 
-      if (diffMinutes > 3) {
+      if (diffMinutes > 10) {
          // Gap detected (> 3 mins). Close old incident.
          await supabase
            .from('incidents')
@@ -434,27 +434,29 @@ async function sendSummaryEmail(toEmail) {
   console.log(`[EMAIL] 📋 Sending SUMMARY to ${toEmail} (${session.logs.length} events)`);
   const clientUrl = "https://observa-client.vercel.app/";
   
-  // Use first, middle, last photos (URL based)
-  let photos = session.logs.map(l => l.frameImage).slice(0, 10); // Check limit
-
-  let photosHtml = photos.map(url => `
-    <div style="margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
-        <img src="${url}" style="width: 100%; display: block;" />
-    </div>
-  `).join('');
-
   const htmlContent = `
     <!DOCTYPE html>
     <body>
         <div style="max-width: 600px; margin: 0 auto; background: white; font-family: sans-serif; border: 1px solid #e2e8f0;">
             <div style="padding: 24px; border-bottom: 1px solid #f1f5f9;">
-                <h1 style="margin: 0;">Activity Report</h1>
-                <p style="color: #64748b;">${session.logs.length} Events Recorded</p>
+                <h1 style="margin: 0; font-size: 20px;">Activity Report</h1>
+                <p style="color: #64748b; margin-top: 5px;">Incident Summary</p>
             </div>
             <div style="padding: 24px;">
-                ${photosHtml}
+                <p style="font-size: 16px; color: #334155; line-height: 1.5;">
+                    Observa has completed monitoring the recent activity session.
+                </p>
+                <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin: 24px 0;">
+                    <p style="margin: 0; font-weight: 600; color: #0f172a;">Total Events Detected: ${session.logs.length}</p>
+                    <p style="margin: 8px 0 0 0; font-size: 14px; color: #64748b;">
+                        Recorded on ${new Date().toLocaleDateString()}
+                    </p>
+                </div>
+                <p style="color: #64748b; font-size: 14px;">
+                    For security and privacy, image evidence is only available on your secure dashboard.
+                </p>
                 <div style="text-align: center; margin-top: 32px;">
-                    <a href="${clientUrl}" style="background: #0f172a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">View Full History</a>
+                    <a href="${clientUrl}" style="background: #0f172a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">View Incident Details</a>
                 </div>
             </div>
         </div>

@@ -10,7 +10,7 @@ const HistoryGrid = () => {
   const { user } = useAuth();
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState(null);
+  const [selectedIncident, setSelectedIncident] = useState(null); // Modal State
 
   useEffect(() => {
     fetchHistory();
@@ -19,80 +19,84 @@ const HistoryGrid = () => {
   const fetchHistory = async () => {
     try {
       if (!user?.email) return;
-      console.log(`Fetching history for ${user.email} from ${API_URL}/events`);
+      
       const response = await axios.get(`${API_URL}/events`, {
         params: { user_email: user.email }
       });
-      console.log("History Response:", response.data);
+      
       if (response.data.success) {
         setIncidents(response.data.incidents || []);
       }
     } catch (error) {
-      console.error("Failed to fetch history:", error);
-      alert(`History Fetch Error: ${error.message}\nURL: ${API_URL}`);
+       // Silent fail or simple console error - user doesn't need alerts in prod
+       console.error("History fetch error:", error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleExpand = (id) => {
-    setExpandedId(expandedId === id ? null : id);
-  };
-
   if (loading) return <div className="history-loading">Loading History...</div>;
 
   return (
-    <div className="history-grid">
-      <div style={{fontSize: '10px', color: '#ccc', marginBottom: '10px', textAlign: 'center'}}>
-        DEBUG: Fetching from {API_URL}/events
+    <>
+      <div className="history-grid">
+        {incidents.length === 0 ? (
+          <p className="empty-state">No recorded incidents yet.</p>
+        ) : (
+          incidents.map((incident) => (
+            <div 
+              key={incident.id} 
+              className="incident-card"
+              onClick={() => setSelectedIncident(incident)}
+            >
+              <div className="incident-header">
+                <div className="incident-time">
+                  <span className="time-badge">
+                    {new Date(incident.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <span className="date-badge">
+                    {new Date(incident.start_time).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="incident-info">
+                  <h3>{incident.total_events} Detections</h3>
+                  <span className={`status ${incident.status}`}>{incident.status}</span>
+                </div>
+              </div>
+
+              <div className="incident-preview">
+                 {/* Show first image as cover */}
+                 {incident.events?.[0] && (
+                   <img 
+                     src={incident.events[0].image_url} 
+                     alt="Incident Cover" 
+                     className="cover-image"
+                   />
+                 )}
+              </div>
+            </div>
+          ))
+        )}
       </div>
-      {incidents.length === 0 ? (
-        <p className="empty-state">
-             No recorded incidents yet. <br/>
-             <small>(Check Console for Details)</small>
-        </p>
-      ) : (
-        incidents.map((incident) => (
-          <div 
-            key={incident.id} 
-            className={`incident-card ${expandedId === incident.id ? 'expanded' : ''}`}
-            onClick={() => toggleExpand(incident.id)}
-          >
-            <div className="incident-header">
-              <div className="incident-time">
-                <span className="time-badge">
-                  {new Date(incident.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                <span className="date-badge">
-                  {new Date(incident.start_time).toLocaleDateString()}
-                </span>
-              </div>
-              <div className="incident-info">
-                <h3>{incident.total_events} Detections</h3>
-                <span className={`status ${incident.status}`}>{incident.status}</span>
-              </div>
-            </div>
 
-            <div className="incident-preview">
-               {/* Show first image as cover */}
-               {incident.events?.[0] && (
-                 <img 
-                   src={incident.events[0].image_url} 
-                   alt="Incident Cover" 
-                   className="cover-image"
-                 />
-               )}
+      {/* MODAL VIEW */}
+      {selectedIncident && (
+        <div className="modal-overlay" onClick={() => setSelectedIncident(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Incident Details</h3>
+              <button className="close-btn" onClick={() => setSelectedIncident(null)}>&times;</button>
             </div>
-
-            {expandedId === incident.id && (
-              <div className="incident-details" onClick={(e) => e.stopPropagation()}>
-                <IncidentSlideshow events={incident.events} />
-              </div>
-            )}
+            <div className="modal-body">
+               <div className="incident-meta-details" style={{marginBottom: '1rem', color: '#64748b'}}>
+                  {new Date(selectedIncident.start_time).toLocaleString()} • {selectedIncident.total_events} Events
+               </div>
+               <IncidentSlideshow events={selectedIncident.events} />
+            </div>
           </div>
-        ))
+        </div>
       )}
-    </div>
+    </>
   );
 };
 
