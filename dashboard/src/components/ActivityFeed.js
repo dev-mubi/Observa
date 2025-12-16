@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import io from 'socket.io-client';
+import { useAuth } from '../contexts/AuthContext';
 import './ActivityFeed.css';
 
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000';
 
 const ActivityFeed = () => {
+  const { user } = useAuth();
   const [events, setEvents] = useState([]);
 
   useEffect(() => {

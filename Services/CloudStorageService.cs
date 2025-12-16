@@ -11,7 +11,7 @@ namespace SentinelIntrusionDetection.Services
     {
         private readonly HttpClient _httpClient;
         // Base URL for your Express Server
-        private const string BaseUrl = "https://observa-ocaa.onrender.com/api"; 
+        private const string BaseUrl = "http://localhost:5000/api"; 
 
         public CloudStorageService(HttpClient httpClient)
         {
