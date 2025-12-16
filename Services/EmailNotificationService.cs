@@ -14,7 +14,7 @@ namespace SentinelIntrusionDetection.Services
     public class EmailNotificationService
     {
         private readonly HttpClient _httpClient;
-        private readonly string _serverUrl = "http://localhost:5000";
+        private readonly string _serverUrl = "https://monitor-my-space-server.onrender.com";
 
 
         public EmailNotificationService(HttpClient httpClient)

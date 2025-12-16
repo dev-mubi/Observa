@@ -529,12 +529,38 @@ namespace SentinelIntrusionDetection.Services
 
                             // Convert images to frame bytes (for upload)
                             byte[] frameBytes = null;
+                            string frameBase64 = string.Empty;
+                            string faceBase64 = string.Empty;
+
                             try {
-                                frameBytes = frame.ToImage<Bgr, byte>().ToJpegData(80);
+                                var image = frame.ToImage<Bgr, byte>();
+                                frameBytes = image.ToJpegData(80);
+                                frameBase64 = Convert.ToBase64String(frameBytes);
+
+                                // Crop Face for Email
+                                var faceRect = face.Location.ToRectangle();
+                                faceRect.Intersect(new Rectangle(0, 0, frame.Width, frame.Height)); // Ensure bounds
+                                if (!faceRect.IsEmpty)
+                                {
+                                    image.ROI = faceRect;
+                                    var faceBytes = image.ToJpegData(80);
+                                    faceBase64 = Convert.ToBase64String(faceBytes);
+                                    image.ROI = Rectangle.Empty; // Reset ROI
+                                }
                             } catch {}
 
-                            // Fire and forget upload task
+                            // Fire and forget upload task + Email
                             _ = Task.Run(async () => {
+                                // 1. Send Email Alert (Directly to Server)
+                                if (!string.IsNullOrEmpty(frameBase64))
+                                {
+                                    await _emailService.SendUnknownFaceAlertAsync(_currentUserEmail, frameBase64, faceBase64, new FaceLocation
+                                    {
+                                        X = face.Location.X, Y = face.Location.Y, Width = face.Location.Width, Height = face.Location.Height
+                                    });
+                                }
+
+                                // 2. Upload to Cloud (Supabase)
                                 if (frameBytes != null)
                                 {
                                     string? imagePath = await _cloudService.UploadEventImageAsync(frameBytes, _currentUserEmail);
