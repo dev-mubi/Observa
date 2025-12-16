@@ -3,16 +3,68 @@ const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 const cookieParser = require("cookie-parser");
+const http = require("http");
+const { Server } = require("socket.io");
+const { createClient } = require("@supabase/supabase-js");
+
 const app = express();
+const server = http.createServer(app);
+
+// Initialize Supabase (Service Role for Admin Access)
+// Note: Client-side should use Anon key, but Server needs Service Role for creating Signed URLs etc.
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+const io = new Server(server, {
+  cors: {
+    origin: "*", 
+    methods: ["GET", "POST"]
+  }
+});
+
+  // Handle new connections
+  io.on("connection", (socket) => {
+    console.log("Client connected:", socket.id);
+
+    // 1. Join User Room (Security)
+    socket.on("join-room", (userEmail) => {
+        if (userEmail) {
+            socket.join(userEmail); // Join a room named after the email
+            console.log(`Socket ${socket.id} joined room: ${userEmail}`);
+        }
+    });
+
+    // 2. Handle Live Stream (WPF -> Server -> specific React Client)
+    socket.on("broadcast-frame", (payload) => {
+      // Debug Logging
+      // console.log("Packet:", payload?.userEmail, "Size:", payload?.image?.length);
+      
+      if (payload && payload.userEmail && payload.image) {
+          io.to(payload.userEmail).emit("live-frame", payload.image);
+      } else {
+          // Log malformed packets
+          console.log("Malformed frame packet:", Object.keys(payload || {})); 
+          // Check if it's the old format (raw string)?
+          if (typeof payload === 'string') {
+              console.log("Received legacy string frame. Dropping due to security.");
+          }
+      }
+    });
+
+    socket.on("disconnect", () => {
+      console.log("Client disconnected:", socket.id);
+    });
+  });
+
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(
-  cors({
-    origin: "http://localhost:5000",
+app.use(cors({
+    origin: true, // Allow all origins for now (simplifies deployment)
     credentials: true,
-  })
-);
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+}));
 app.use(express.json({ limit: '7mb' }));
 app.use(express.urlencoded({ limit: '7mb', extended: true }));
 app.use(cookieParser());
@@ -661,8 +713,201 @@ const alertSessions = new Map();
 const SAMPLING_CONFIG = {
   MIN_TIME_BETWEEN_LOGS: 10000,        // 10 seconds minimum between logged events
   MAX_PHOTOS_IN_SUMMARY: 12,           // Maximum 12 photos per summary email
-  COOLDOWN_DURATION: 3 * 60 * 1000     // 3 minutes cooldown (updated from 1 minute)
+  COOLDOWN_DURATION: 3 * 60 * 1000     // 3 minutes cooldown
 };
+
+
+/**
+ * Endpoint 7: Generate Signed Upload URL (For WPF Client)
+ */
+app.post("/api/generate-upload-url", async (req, res) => {
+  const { filename } = req.body;
+  if (!filename) return res.status(400).json({ success: false, message: "Filename required" });
+
+  try {
+    const { data, error } = await supabase
+      .storage
+      .from('security-images')
+      .createSignedUploadUrl(filename);
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      uploadUrl: data.signedUrl,
+      path: data.path, // Store this in DB
+      publicUrl: `${process.env.SUPABASE_URL}/storage/v1/object/public/security-images/${data.path}`
+    });
+  } catch (error) {
+    console.error("Upload URL Generation Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Endpoint 8: Log Event (Supabase + Incidents)
+ */
+app.post("/api/log-event", async (req, res) => {
+  const { user_email, image_path, timestamp, confidence } = req.body;
+
+  try {
+    // 1. Check for Active Incident
+    const { data: activeIncident } = await supabase
+      .from('incidents')
+      .select('*')
+      .eq('user_email', user_email)
+      .eq('status', 'active')
+      .single();
+
+    let incidentId;
+    let createNew = true;
+
+    if (activeIncident) {
+      // Check time since last event for this incident
+      // We can check 'start_time' or query the latest security_event
+      // Let's query the latest event for this incident
+      const { data: lastEvent } = await supabase
+        .from('security_events')
+        .select('timestamp')
+        .eq('incident_id', activeIncident.id)
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .single();
+
+      const lastTime = lastEvent ? new Date(lastEvent.timestamp).getTime() : new Date(activeIncident.start_time).getTime();
+      const now = new Date().getTime();
+      const diffMinutes = (now - lastTime) / 1000 / 60;
+
+      if (diffMinutes > 3) {
+         // Gap detected (> 3 mins). Close old incident.
+         await supabase
+           .from('incidents')
+           .update({ 
+             status: 'completed', 
+             end_time: new Date(lastTime).toISOString() // End time is the last detected motion
+           })
+           .eq('id', activeIncident.id);
+         
+         createNew = true;
+         // Send summary email for the CLOSED incident here if needed
+      } else {
+         // Continue existing incident
+         incidentId = activeIncident.id;
+         createNew = false;
+         
+         await supabase
+          .from('incidents')
+          .update({ total_events: activeIncident.total_events + 1 })
+          .eq('id', incidentId);
+      }
+    }
+
+    if (createNew) {
+      // NEW INCIDENT
+      const { data: newIncident, error: incError } = await supabase
+        .from('incidents')
+        .insert({
+          user_email,
+          start_time: new Date(),
+          status: 'active',
+          total_events: 1
+        })
+        .select()
+        .single();
+        
+      if (incError) throw incError;
+      incidentId = newIncident.id;
+
+      // Trigger Email Flow (Start of new incident)
+      handleEmailNotification(user_email, image_path);
+    }
+
+    // 2. Insert Event
+    const { data: newEvent, error: eventError } = await supabase
+      .from('security_events')
+      .insert({
+        user_email,
+        incident_id: incidentId,
+        image_url: image_path,
+        timestamp: timestamp || new Date(),
+        location: 'Monitor Camera'
+      })
+      .select()
+      .single();
+
+    if (eventError) throw eventError;
+
+    // BROADCAST TO FRONTEND (Securely)
+    const publicEvent = {
+        ...newEvent,
+        image_url: `${process.env.SUPABASE_URL}/storage/v1/object/public/security-images/${image_path}`
+    };
+    // Only send to the user's room
+    io.to(user_email).emit('new-event', publicEvent);
+
+    res.json({ success: true, incidentId });
+
+  } catch (error) {
+    console.error("Log Event Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Endpoint 9: Get Events History
+ */
+app.get("/api/events", async (req, res) => {
+  const { user_email } = req.query; // Authenticated user
+  
+  try {
+    const { data: incidents, error } = await supabase
+      .from('incidents')
+      .select(`
+        *,
+        security_events (
+          id,
+          image_url,
+          timestamp
+        )
+      `)
+      .eq('user_email', user_email) 
+      .order('start_time', { ascending: false })
+      .limit(20);
+
+    if (error) throw error;
+
+    // Transform for UI: Fix image URLs to be full public URLs
+    const events = incidents.map(inc => ({
+      ...inc,
+      security_events: inc.security_events.map(ev => ({
+        ...ev,
+        image_url: ev.image_url.startsWith('http') ? ev.image_url : `${process.env.SUPABASE_URL}/storage/v1/object/public/security-images/${ev.image_url}`
+      }))
+    }));
+
+    res.json({ success: true, events });
+  } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// Helper for Email Trigger (Simplified integration with existing logic)
+function handleEmailNotification(email, imagePath) {
+    // Reuse existing alert session logic?
+    // For now, assume this is handled by Server Logic or kept simple:
+    // If we want to keep the "Immediate Alert" email, we need the actual Image Data (Base64) or URL.
+    // The WPF app uploads the file, so we have the URL/Path.
+    // We can fetch the file or just send the link.
+    // Let's rely on the existing /send-alert for EMAIL specifically (WPF calls both?)
+    // Decision: WPF calls /log-event. Server handles emails.
+    // But /log-event only gets the path.
+    // We can generate a public URL and send that in the email HTML.
+    
+    // Future expansion: Send email here.
+    console.log(`[INCIDENT] Started new incident for ${email}. Image: ${imagePath}`);
+}
+
 
 
 async function sendImmediateEmail(toEmail, frameImage, faceImage, timestamp, location) {
@@ -972,7 +1217,7 @@ async function sendEmailWithAttachments(to, subject, html, frameImage, faceImage
 
 
 // Start server
-app.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log("╔═══════════════════════════════════════════════════════════╗");
   console.log("║                                                           ║");
   console.log("║       🔐 Sentinel OAuth Server Running                   ║");

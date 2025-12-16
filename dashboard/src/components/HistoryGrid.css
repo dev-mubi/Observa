@@ -1,0 +1,135 @@
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+  padding: 0;
+}
+
+.incident-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.incident-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  border-color: #cbd5e1;
+}
+
+.incident-card.expanded {
+  grid-column: 1 / -1;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.incident-header {
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #f8fafc;
+  background: white;
+}
+
+.incident-time {
+  display: flex;
+  flex-direction: column;
+}
+
+.time-badge {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.date-badge {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.incident-info h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #334155;
+  text-align: right;
+}
+
+.status {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: #10b981;
+  font-weight: 700;
+  padding: 2px 6px;
+  background: #ecfdf5;
+  border-radius: 4px;
+}
+
+.incident-preview {
+  height: 160px;
+  overflow: hidden;
+  position: relative;
+  background: #f1f5f9;
+}
+
+.cover-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Expanded Details */
+.incident-details {
+  padding: 1.5rem;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+}
+
+.incident-details h4 {
+  margin-top: 0;
+  color: #64748b;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  margin-bottom: 1rem;
+}
+
+.event-gallery {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+.event-thumb {
+  flex: 0 0 160px;
+}
+
+.event-thumb img {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.ev-time {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: #64748b;
+  text-align: center;
+}
+
+.history-loading {
+    color: #64748b;
+    padding: 2rem;
+    text-align: center;
+}

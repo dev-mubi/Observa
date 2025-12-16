@@ -35,6 +35,7 @@ namespace SentinelIntrusionDetection
 
             services.AddSingleton<FaceRecognitionService>();
             services.AddHttpClient<EmailNotificationService>(); // Register EmailService with HttpClient
+            services.AddHttpClient<CloudStorageService>(); // Register CloudStorageService
 
             // Use local C# Vision Service with YOLO instead of remote backend
             services.AddSingleton<LocalVisionService>();

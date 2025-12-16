@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using SocketIOClient;
 
 namespace SentinelIntrusionDetection.Services
 {
@@ -29,6 +30,7 @@ namespace SentinelIntrusionDetection.Services
 
         private readonly FaceRecognitionService _faceService;
         private readonly EmailNotificationService _emailService;
+        private readonly CloudStorageService _cloudService;
         private string _currentUserEmail = string.Empty;
 
         // Control flag to suppress alerts (e.g. during enrollment)
@@ -38,6 +40,7 @@ namespace SentinelIntrusionDetection.Services
         private int _detectionFrameInterval = 4;
         private int _frameCounter = 0;
         private List<DetectedFace> _lastFaceDetections = new();
+        private SocketIOClient.SocketIO? _socketClient;
 
         // Motion detection settings - KEEPING THESE
         private const int MotionThreshold = 25;
@@ -62,15 +65,33 @@ namespace SentinelIntrusionDetection.Services
 
         public LocalVisionService(
             FaceRecognitionService faceService, 
-            EmailNotificationService emailService)
+            EmailNotificationService emailService,
+            CloudStorageService cloudService)
         {
             _faceService = faceService;
             _emailService = emailService;
+            _cloudService = cloudService;
             
             // Initialize models
             _faceService.Initialize();
             
-            Console.WriteLine("✓ LocalVisionService initialized with Face Detection");
+             Console.WriteLine("✓ LocalVisionService initialized with Face Detection");
+             
+             InitializeSocket();
+        }
+
+        private async void InitializeSocket()
+        {
+            try 
+            {
+                _socketClient = new SocketIOClient.SocketIO("http://localhost:5000");
+                await _socketClient.ConnectAsync();
+                Console.WriteLine("✓ Connected to Live Stream Server");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Socket connection failed: {ex.Message}");
+            }
         }
 
         public async Task<VisionStartResponse> StartMonitoringAsync(string mode, string userId)
@@ -338,6 +359,23 @@ namespace SentinelIntrusionDetection.Services
 
                     frame.Dispose();
 
+                    // Broadcast Frame to Socket (Fire and forget, don't await)
+                    if (_socketClient != null && _socketClient.Connected)
+                    {
+                        // Use the annotated frame or raw frame? Annotated has overlays, which is good for dashboard.
+                        // But we need to convert to Base64 first.
+                        string frameBase64 = MatToBase64(annotatedFrame);
+                        if (!string.IsNullOrEmpty(frameBase64)) 
+                        {
+                            // 4b. Broadcast Securely (Include User Email)
+                            await _socketClient.EmitAsync("broadcast-frame", new 
+                            { 
+                                userEmail = _currentUserEmail, 
+                                image = frameBase64 
+                            });
+                        }
+                    }
+
                     // Process at ~30 FPS
                     await Task.Delay(33, cancellationToken);
                 }
@@ -485,35 +523,26 @@ namespace SentinelIntrusionDetection.Services
                         if (timeSinceLastAlert.TotalSeconds > PersonAlertCooldownSeconds)
                         {
                             _lastPersonAlert = DateTime.Now;
-                            Console.WriteLine($"[EMAIL] Sending Person Alert (Cooldown passed)...");
+                            _lastPersonAlert = DateTime.Now;
+                            Console.WriteLine($"[ALERT] Process started for unknown face...");
 
-                            // Convert images to Base64 (async in background)
-                            string frameBase64 = MatToBase64(frame);
-                            string faceBase64 = frameBase64; // Fallback
-                            
-                            if (rect.Width > 0 && rect.Height > 0)
-                            {
-                                // Ensure rect is valid
-                                var safeRect = rect;
-                                safeRect.Intersect(new Rectangle(0, 0, frame.Width, frame.Height));
-                                
-                                if (safeRect.Width > 0 && safeRect.Height > 0)
+                            // Convert images to frame bytes (for upload)
+                            byte[] frameBytes = null;
+                            try {
+                                frameBytes = frame.ToImage<Bgr, byte>().ToJpegData(80);
+                            } catch {}
+
+                            // Fire and forget upload task
+                            _ = Task.Run(async () => {
+                                if (frameBytes != null)
                                 {
-                                    using var faceMat = new Mat(frame, safeRect);
-                                    faceBase64 = MatToBase64(faceMat);
+                                    string? imagePath = await _cloudService.UploadEventImageAsync(frameBytes, _currentUserEmail);
+                                    if (imagePath != null)
+                                    {
+                                        await _cloudService.LogEventAsync(_currentUserEmail, imagePath, 0.9);
+                                    }
                                 }
-                            }
-
-                            _ = _emailService.SendUnknownFaceAlertAsync(
-                                _currentUserEmail,
-                                frameBase64,
-                                faceBase64,
-                                new FaceLocation 
-                                { 
-                                    X = rect.X, Y = rect.Y, 
-                                    Width = rect.Width, Height = rect.Height 
-                                }
-                            );
+                            });
                         }
                     }
                 }
