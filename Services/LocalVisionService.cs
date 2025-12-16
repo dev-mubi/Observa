@@ -84,7 +84,8 @@ namespace SentinelIntrusionDetection.Services
         {
             try 
             {
-                _socketClient = new SocketIOClient.SocketIO("http://localhost:5000");
+                // switch to production server
+                _socketClient = new SocketIOClient.SocketIO("https://observa-ocaa.onrender.com");
                 await _socketClient.ConnectAsync();
                 Console.WriteLine("✓ Connected to Live Stream Server");
             }

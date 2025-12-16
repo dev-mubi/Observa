@@ -14,8 +14,9 @@ const Login = () => {
     <div className="login-container">
       <div className="login-card">
         <div className="logo-section">
-          <h1>Observa</h1>
-          <span className="badge">Security Hub</span>
+          <h1>
+            <span style={{ fontSize: '1.2em' }}>◎</span> Observa
+          </h1>
         </div>
         
         <p className="description">
