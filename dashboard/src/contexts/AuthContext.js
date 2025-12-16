@@ -7,7 +7,12 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('sentinel_token'));
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('sentinel_token'));
-  const [isLoading, setIsLoading] = useState(false);
+  
+  // FIX: Initialize loading to true if we are in the middle of a callback (have 'code')
+  // This prevents ProtectedRoute from redirecting to /login before we exchange the token
+  const hasAuthCode = !!new URLSearchParams(window.location.search).get('code');
+  const [isLoading, setIsLoading] = useState(hasAuthCode);
+  
   const [error, setError] = useState(null);
 
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
