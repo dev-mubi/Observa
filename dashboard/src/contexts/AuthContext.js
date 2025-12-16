@@ -13,11 +13,37 @@ export const AuthProvider = ({ children }) => {
   const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
   useEffect(() => {
-    // If we have a token, verify it on mount
-    if (token) {
+    // 1. Check for Auth Code (redirect from Sentinel)
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+
+    if (code) {
+      // Clear code from URL to prevent loop/re-use
+      window.history.replaceState({}, document.title, window.location.pathname);
+      exchangeCodeForToken(code);
+    } 
+    // 2. Or check for existing token
+    else if (token) {
       verifyToken(token);
     }
   }, []);
+
+  const exchangeCodeForToken = async (code) => {
+    setIsLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/api/auth/exchange`, { code });
+      if (response.data.success) {
+        handleLoginSuccess(response.data);
+      } else {
+        setError(response.data.message || "Failed to exchange token");
+        setIsLoading(false);
+      }
+    } catch (err) {
+      console.error("Exchange error:", err);
+      setError("Authentication failed during token exchange.");
+      setIsLoading(false);
+    }
+  };
 
   const verifyToken = async (existingToken) => {
     try {
@@ -37,15 +63,12 @@ export const AuthProvider = ({ children }) => {
     setIsLoading(true);
     setError(null);
     try {
-      // 1. Get Auth URL and Session ID
-      const { data } = await axios.get(`${API_URL}/login`);
+      // 1. Get Auth URL from Web Endpoint
+      const { data } = await axios.get(`${API_URL}/login-web`);
       
       if (data.success) {
-        // 2. Open Sentinel Login in new window
-        window.open(data.authUrl, '_blank', 'width=500,height=600');
-        
-        // 3. Start Polling
-        pollTokenStatus(data.sessionId);
+        // 2. Full Page Redirect (Standard Web OAuth)
+        window.location.href = data.authUrl;
       } else {
         setError('Failed to initiate login');
         setIsLoading(false);
